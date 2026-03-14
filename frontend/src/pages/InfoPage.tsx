@@ -36,58 +36,48 @@ function formatDuration(ms: number) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-// ── JSON tree viewer ─────────────────────────────────────────────────────
+// ── JSON code block with copy ────────────────────────────────────────────
 
-function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
-  if (value === null || value === undefined) {
-    return <span className="text-gray-400 italic">null</span>;
-  }
-  if (typeof value === 'boolean') {
-    return <span className="text-purple-600">{String(value)}</span>;
-  }
-  if (typeof value === 'number') {
-    return <span className="text-blue-600">{value}</span>;
-  }
-  if (typeof value === 'string') {
-    if (value.length > 300) {
-      return (
-        <span className="text-green-700 wrap-break-word">
-          "{value.slice(0, 300)}…"
-        </span>
-      );
-    }
-    return <span className="text-green-700 wrap-break-word">"{value}"</span>;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-gray-400">[]</span>;
-    if (depth > 2) return <span className="text-gray-400">[{value.length} items]</span>;
-    return (
-      <div className="ml-4 border-l-2 border-gray-200 pl-3">
-        {value.map((item, i) => (
-          <div key={i} className="py-0.5">
-            <span className="text-gray-400 text-xs mr-1">{i}:</span>
-            <JsonValue value={item} depth={depth + 1} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return <span className="text-gray-400">{'{}'}</span>;
-    if (depth > 2) return <span className="text-gray-400">{`{${entries.length} keys}`}</span>;
-    return (
-      <div className="ml-4 border-l-2 border-gray-200 pl-3">
-        {entries.map(([k, v]) => (
-          <div key={k} className="py-0.5">
-            <span className="text-gray-500 font-medium text-sm">{k}: </span>
-            <JsonValue value={v} depth={depth + 1} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <span>{String(value)}</span>;
+function JsonBlock({ value }: { value: unknown }) {
+  const [copied, setCopied] = useState(false);
+  const json = JSON.stringify(value, null, 2);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(json).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={handleCopy}
+        title="Copy JSON"
+        className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium transition-colors z-10"
+      >
+        {copied ? (
+          <>
+            <svg className="w-3.5 h-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            Copied!
+          </>
+        ) : (
+          <>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Copy
+          </>
+        )}
+      </button>
+      <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 pt-10 overflow-auto max-h-96 text-xs leading-relaxed font-mono whitespace-pre">
+        {json}
+      </pre>
+    </div>
+  );
 }
 
 // ── Agent step card ──────────────────────────────────────────────────────
@@ -149,8 +139,8 @@ function AgentCard({ step, maxDuration }: { step: AgentStep; maxDuration: number
               Output
             </button>
           </div>
-          <div className="p-4 max-h-96 overflow-auto text-sm">
-            <JsonValue
+          <div className="p-4">
+            <JsonBlock
               value={expanded === 'input' ? step.input_summary : step.output}
             />
           </div>

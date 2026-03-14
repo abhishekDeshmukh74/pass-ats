@@ -5,10 +5,6 @@ interface ResumeUploadProps {
   onDone: (resumeText: string, fileB64?: string, fileType?: string) => void;
 }
 
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-] as const;
-
 const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -18,8 +14,8 @@ const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
   const handleFile = useCallback(
     async (file: File) => {
       const ext = file.name.toLowerCase();
-      if (!ALLOWED_MIME_TYPES.includes(file.type as typeof ALLOWED_MIME_TYPES[number]) && !ext.endsWith('.pdf')) {
-        setError('Only PDF files are supported.');
+      if (!ext.endsWith('.pdf') && !ext.endsWith('.tex')) {
+        setError('Only PDF and LaTeX (.tex) files are supported.');
         return;
       }
       setError(null);
@@ -57,7 +53,7 @@ const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-gray-800">Upload Your Resume</h2>
-      <p className="text-sm text-gray-500">Supported format: PDF (max 10 MB)</p>
+      <p className="text-sm text-gray-500">Supported formats: PDF or LaTeX (.tex) — max 10 MB</p>
 
       <label
         className={`block border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors
@@ -68,7 +64,7 @@ const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
       >
         <input
           type="file"
-          accept=".pdf"
+          accept=".pdf,.tex,application/pdf,text/x-tex,application/x-tex"
           className="hidden"
           onChange={onInputChange}
           disabled={loading}
