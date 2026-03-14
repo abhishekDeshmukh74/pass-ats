@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import Counter
 
 from backend.models import TextReplacement
@@ -38,6 +39,14 @@ Your job is to review and FIX every replacement to ensure quality:
 4. NATURALNESS: The "new" text must read naturally, not like keyword stuffing.
 
 5. NO IDENTICAL PAIRS: Remove any replacement where old == new.
+
+6. SKILLS SECTION — COMMA-SEPARATED KEYWORDS ONLY:
+   Any replacement whose "old" text matches a skills-line pattern
+   (e.g. "Category: Skill1, Skill2, Skill3") must keep the "new" text in the
+   SAME format: comma-separated keywords with NO trailing prose, filler phrases,
+   or sentences (no "with experience in...", "and expertise in...", etc.).
+   GOOD: "Frontend: React, Next.js, Tailwind CSS, Redux, HTML, CSS"
+   BAD:  "Frontend: React, Next.js, Tailwind CSS, with experience in Clerk."
 
 ═══ RESPONSE FORMAT ═══
 
@@ -96,6 +105,24 @@ def qa_and_deduplicate(state: AgentState) -> dict:
         logger.info("QA agent: applied %d fixes: %s", len(fixes), "; ".join(fixes[:5]))
 
     # Final programmatic dedup safety net
+    _SKILLS_LINE = re.compile(r"^[A-Za-z][^:]{0,40}:\s*.+")
+    _TRAILING_PROSE = re.compile(r",?\s+(?:with|and|including|such as|plus)\b.+$", re.IGNORECASE)
+
+    def _enforce_skills_format(old: str, new: str) -> str:
+        """Strip trailing prose from skills-line replacements."""
+        if not _SKILLS_LINE.match(old.strip()):
+            return new
+        # Check that old is a skills line (no full stop, mostly comma-separated)
+        old_clean = old.strip()
+        looks_like_skills = old_clean.count(",") >= 1 and not old_clean.endswith(".")
+        if not looks_like_skills:
+            return new
+        # Strip any prose appended after the last real keyword
+        cleaned = _TRAILING_PROSE.sub("", new.strip()).rstrip(",; ").rstrip(".")
+        if cleaned != new.strip():
+            logger.debug("QA post-filter: stripped prose from skills line: %r → %r", new, cleaned)
+        return cleaned
+
     final: list[TextReplacement] = []
     seen_old: set[str] = set()
     for r in reviewed:
@@ -106,6 +133,9 @@ def qa_and_deduplicate(state: AgentState) -> dict:
         if old in seen_old:
             continue
         seen_old.add(old)
+        new = _enforce_skills_format(old, new)
+        if old == new:
+            continue
         final.append(TextReplacement(old=old, new=new))
 
     logger.info("QA agent: %d → %d final replacements.", len(raw), len(final))

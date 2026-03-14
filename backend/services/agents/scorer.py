@@ -11,11 +11,10 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM = """You are an ATS scoring and resume parsing specialist.
 
-You receive the original resume text and the final set of replacements.
-Apply the replacements mentally to produce the "final resume".
+You receive the fully rewritten resume text.
 
-Then:
-1. Score the final resume against the JD keywords (0-100).
+Your tasks:
+1. Score the resume against the JD keywords (0-100).
 2. List all matched keywords.
 3. Extract structured resume data for the API response.
 
@@ -96,26 +95,31 @@ def score_before_rewrite(state: AgentState) -> dict:
     return {"ats_score_before": score}
 
 
+def _apply_replacements_to_text(resume_text: str, replacements: list) -> str:
+    """Apply old→new replacements to the resume text to produce the rewritten version."""
+    text = resume_text
+    for r in replacements:
+        if r.old and r.new and r.old != r.new:
+            text = text.replace(r.old, r.new, 1)
+    return text
+
+
 def score_and_extract(state: AgentState) -> dict:
-    """Node: score the final resume and extract structured fields."""
+    """Node: score the final rewritten resume and extract structured fields."""
     llm = get_llm()
 
     replacements = state.get("replacements", [])
-    replacements_str = "\n".join(
-        f"OLD: {r.old}\nNEW: {r.new}\n---"
-        for r in replacements
-    )
+    rewritten_text = _apply_replacements_to_text(state["resume_text"], replacements)
 
     keywords = state.get("jd_keywords", [])
 
     resp = llm.invoke([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
-            f"## Original Resume\n\n{state['resume_text']}\n\n"
+            f"## Rewritten Resume\n\n{rewritten_text}\n\n"
             f"## JD Keywords\n\n{', '.join(keywords)}\n\n"
-            f"## Applied Replacements\n\n{replacements_str}\n\n"
             f"## Job Description\n\n{state['jd_text']}\n\n"
-            "Score the final resume and extract structured data."
+            "Score the rewritten resume and extract structured data."
         )},
     ])
 
