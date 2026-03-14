@@ -25,6 +25,12 @@ class CertificationItem(BaseModel):
     date: Optional[str] = None
 
 
+class TextReplacement(BaseModel):
+    """A single old→new text substitution identified by the AI."""
+    old: str   # exact substring from the original resume text
+    new: str   # rewritten substring to replace it with
+
+
 class ResumeData(BaseModel):
     name: str
     email: Optional[str] = None
@@ -37,13 +43,22 @@ class ResumeData(BaseModel):
     experience: list[ExperienceItem] = []
     education: list[EducationItem] = []
     certifications: list[CertificationItem] = []
-    ats_score: Optional[int] = None          # 0-100
+    ats_score_before: Optional[int] = None   # 0-100 (before rewrite)
+    ats_score: Optional[int] = None            # 0-100 (after rewrite)
     matched_keywords: list[str] = []
+    replacements: list[TextReplacement] = []  # explicit old→new pairs for PDF rewriting
 
 
 class GenerateRequest(BaseModel):
     resume_text: str
     jd_text: str
+    resume_file_b64: str   # base64 original PDF bytes
+    resume_file_type: str = "pdf"
+
+
+class GenerateResponse(BaseModel):
+    resume: ResumeData
+    rewritten_file_b64: str  # base64-encoded rewritten PDF
 
 
 class ScrapeRequest(BaseModel):
@@ -52,3 +67,10 @@ class ScrapeRequest(BaseModel):
 
 class TextResponse(BaseModel):
     text: str
+
+
+class ParsedResumeResponse(BaseModel):
+    text: str        # plain text (used by AI pipeline)
+    html: str        # styled HTML preserving fonts, colours, layout
+    file_b64: str    # base64-encoded original PDF bytes
+    file_type: str   # "pdf"

@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from groq import Groq
 from backend.models import ResumeData
+
+logger = logging.getLogger(__name__)
 
 _client: Groq | None = None
 
@@ -16,39 +19,51 @@ def _get_client() -> Groq:
     return _client
 
 
-_SYSTEM_PROMPT = """You are an expert ATS (Applicant Tracking System) resume writer.
-Your task is to tailor a candidate's resume TEXT CONTENT to pass ATS screening for a specific job description.
+_SYSTEM_PROMPT = """You are an expert ATS (Applicant Tracking System) resume optimiser.
+You receive the EXACT TEXT extracted from a candidate's PDF resume and a target job description (JD).
+Your goal is to rewrite the resume so it scores **above 90 %** on ATS keyword matching.
 
-STRICT RULES — structure preservation:
-- You MUST keep the EXACT SAME number of experience entries, job titles, company names, and dates as the original.
-- You MUST keep the EXACT SAME number of education entries, degrees, institutions, and graduation dates.
-- You MUST keep the EXACT SAME certifications (names, issuers, dates).
-- Do NOT add, remove, or merge any job, education, or certification entry.
-- Do NOT invent responsibilities, skills, or credentials that are not implied by the original.
+═══ CRITICAL: THE "replacements" ARRAY DRIVES THE PDF REWRITE ═══
 
-What you MAY change (text content only):
-- Rewrite bullet point text to use JD keywords and phrasing naturally — keep the same number of bullets per role.
-- Rewrite the professional summary to target this specific role.
-- Reorder and augment the skills list to surface the most JD-relevant ones first; you may add widely-used aliases (e.g. "JS" → "JavaScript") but not fabricate skills.
+The "replacements" array is what actually changes the PDF. If the "old" values
+are wrong, NOTHING gets changed and the user receives their original resume.
 
-ATS scoring:
-- After tailoring, score the resume's keyword match against the JD from 0 to 100 (integer).
-  - 90-100: near-perfect keyword coverage
-  - 70-89: strong match
-  - 50-69: moderate match
-  - below 50: weak match
-- List the top JD keywords/phrases that now appear in the resume as "matched_keywords" (max 15 items).
+REPLACEMENT RULES:
+  • "old" must be a VERBATIM, character-for-character copy from the Original Resume.
+    Do NOT fix typos, change spacing, add/remove punctuation, or rephrase.
+  • ONE replacement per bullet point. Do NOT combine multiple bullets into one replacement.
+  • ONE replacement for the summary paragraph.
+  • ONE replacement per skills line you change.
+  • "new" must be approximately the SAME LENGTH as "old" (±20%).
+    The text must fit in the same physical space on the PDF.
+    If you need more words, use shorter synonyms. Do not make "new" much longer than "old".
+  • Do NOT include replacements where old == new.
 
-Return ONLY a valid JSON object — no markdown fences, no prose. Schema:
+What to rewrite:
+  • EVERY experience bullet — weave in JD keywords, action verbs, technologies.
+  • The professional summary — tailor to the target role.
+  • Skills lines — reorder, add JD-relevant aliases (e.g. "JS" → "JavaScript").
+
+What NOT to change (never include these as "old"):
+  • Section headers (EXPERIENCE, EDUCATION, SKILLS, etc.)
+  • Job titles, company names, employment dates
+  • Degree names, institution names, graduation dates
+  • Certifications, contact info
+
+═══ RESPONSE FORMAT (pure JSON, no markdown) ═══
+
 {
+  "replacements": [
+    {"old": "exact verbatim text from resume", "new": "ATS-optimised rewrite of similar length"}
+  ],
   "name": "string",
   "email": "string or null",
   "phone": "string or null",
   "linkedin": "string or null",
   "github": "string or null",
   "location": "string or null",
-  "summary": "string",
-  "skills": ["string"],
+  "summary": "rewritten summary",
+  "skills": ["skill1", "skill2"],
   "experience": [
     {
       "job_title": "string",
@@ -56,7 +71,7 @@ Return ONLY a valid JSON object — no markdown fences, no prose. Schema:
       "location": "string or null",
       "start_date": "string",
       "end_date": "string",
-      "bullets": ["string"]
+      "bullets": ["rewritten bullet"]
     }
   ],
   "education": [
@@ -75,22 +90,37 @@ Return ONLY a valid JSON object — no markdown fences, no prose. Schema:
       "date": "string or null"
     }
   ],
-  "ats_score": 0,
-  "matched_keywords": ["string"]
-}"""
+  "ats_score": 90,
+  "matched_keywords": ["keyword1", "keyword2"]
+}
+
+═══ STRUCTURE RULES ═══
+
+• Same number of experience entries, bullets per role, education entries.
+• Do NOT add, remove, merge entries or fabricate experience.
+• ats_score: integer 0-100, must reflect keyword coverage AFTER your rewrites.
+• matched_keywords: top JD keywords now present in the resume.
+
+Return ONLY valid JSON."""
 
 
 def generate_resume(resume_text: str, jd_text: str) -> ResumeData:
-    """Call Groq to generate a tailored resume and return a validated ResumeData."""
+    """Call Groq to generate a tailored resume with explicit replacement pairs."""
     client = _get_client()
 
     user_prompt = (
         f"## Original Resume\n\n{resume_text}\n\n"
         f"## Job Description\n\n{jd_text}\n\n"
-        "Tailor the resume text content to match this job description.\n"
-        "IMPORTANT: Preserve every job entry, company, date, degree, and certification exactly. "
-        "Only rewrite bullet text, summary, and skills. "
-        "Also provide ats_score (0-100) and matched_keywords. Return only the JSON object."
+        "Tailor the resume to achieve an ATS keyword-match score ABOVE 90%.\n\n"
+        "CRITICAL INSTRUCTIONS FOR REPLACEMENTS:\n"
+        "1. Every 'old' value MUST be an EXACT copy-paste from the Original Resume "
+        "text above — character for character, including all punctuation and spacing.\n"
+        "2. Rewrite EVERY bullet point to incorporate JD keywords.\n"
+        "3. Rewrite the summary to target this specific role.\n"
+        "4. Reorder and augment skills with JD-relevant terms.\n"
+        "5. The 'replacements' array is what actually changes the PDF — if it is "
+        "empty or the 'old' values don't match, the user gets their original resume.\n\n"
+        "Return only the JSON object."
     )
 
     completion = client.chat.completions.create(
@@ -99,11 +129,21 @@ def generate_resume(resume_text: str, jd_text: str) -> ResumeData:
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.4,
-        max_tokens=4096,
+        temperature=0.2,
+        max_tokens=8192,
         response_format={"type": "json_object"},
     )
 
     raw = completion.choices[0].message.content
     data = json.loads(raw)
-    return ResumeData(**data)
+
+    resume = ResumeData(**data)
+
+    # Log replacement stats
+    n = len(resume.replacements)
+    identical = sum(1 for r in resume.replacements if r.old == r.new)
+    logger.info("AI returned %d replacements (%d identical/skipped).", n, identical)
+    if n == 0:
+        logger.warning("AI returned ZERO replacements — resume will be unchanged.")
+
+    return resume

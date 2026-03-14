@@ -1,8 +1,10 @@
 ﻿import { useState } from 'react';
+import { Routes, Route, Link } from 'react-router-dom';
 import StepIndicator from './components/StepIndicator';
 import ResumeUpload from './components/ResumeUpload';
 import JDInput from './components/JDInput';
 import ResumePreview from './components/ResumePreview';
+import InfoPage from './pages/InfoPage';
 import { generateResume } from './api/client';
 import type { ResumeData } from './types/resume';
 
@@ -10,26 +12,39 @@ const STEPS = ['Upload Resume', 'Job Description', 'Generate', 'Preview'];
 
 type Step = 1 | 2 | 3 | 4;
 
-export default function App() {
+const App = () => {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/info" element={<InfoPage />} />
+    </Routes>
+  );
+};
+
+const HomePage = () => {
   const [step, setStep] = useState<Step>(1);
   const [resumeText, setResumeText] = useState('');
-  const [jdText, setJdText] = useState('');
+  const [resumeFileB64, setResumeFileB64] = useState('');
+  const [resumeFileType, setResumeFileType] = useState('pdf');
   const [generatedResume, setGeneratedResume] = useState<ResumeData | null>(null);
+  const [rewrittenFileB64, setRewrittenFileB64] = useState('');
   const [genError, setGenError] = useState<string | null>(null);
 
-  const handleResumeUploaded = (text: string) => {
+  const handleResumeUploaded = (text: string, fileB64?: string, fileType?: string) => {
     setResumeText(text);
+    setResumeFileB64(fileB64 ?? '');
+    setResumeFileType(fileType ?? 'pdf');
     setStep(2);
   };
 
   const handleJdReady = async (jd: string) => {
-    setJdText(jd);
     setGenError(null);
     setStep(3);
 
     try {
-      const data = await generateResume(resumeText, jd);
-      setGeneratedResume(data);
+      const data = await generateResume(resumeText, jd, resumeFileB64, resumeFileType);
+      setGeneratedResume(data.resume);
+      setRewrittenFileB64(data.rewritten_file_b64);
       setStep(4);
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : 'Generation failed.');
@@ -40,13 +55,15 @@ export default function App() {
   const handleStartOver = () => {
     setStep(1);
     setResumeText('');
-    setJdText('');
+    setResumeFileB64('');
+    setResumeFileType('pdf');
     setGeneratedResume(null);
+    setRewrittenFileB64('');
     setGenError(null);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 to-blue-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-3 shadow-sm">
         <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -56,6 +73,10 @@ export default function App() {
         </div>
         <span className="text-lg font-bold text-gray-800">pass-ats</span>
         <span className="text-xs text-gray-400 ml-1">AI Resume Tailor</span>
+        <div className="flex-1" />
+        <Link to="/info" className="text-sm text-blue-600 font-medium hover:underline">
+          Pipeline Runs
+        </Link>
       </header>
 
       <main className="flex-1 flex flex-col items-center py-10 px-4">
@@ -87,11 +108,17 @@ export default function App() {
             )}
 
             {step === 4 && generatedResume && (
-              <ResumePreview resume={generatedResume} onStartOver={handleStartOver} />
+              <ResumePreview
+                resume={generatedResume}
+                onStartOver={handleStartOver}
+                rewrittenFileB64={rewrittenFileB64}
+              />
             )}
           </div>
         </div>
       </main>
     </div>
   );
-}
+};
+
+export default App;

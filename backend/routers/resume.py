@@ -1,29 +1,22 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from backend.models import TextResponse
-from backend.services.parser import parse_pdf, parse_docx
+from backend.models import ParsedResumeResponse
+from backend.services.parser import parse_pdf
 
 router = APIRouter()
 
-_ALLOWED_TYPES = {
-    "application/pdf": parse_pdf,
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": parse_docx,
-}
 
-
-@router.post("/parse-resume", response_model=TextResponse)
+@router.post("/parse-resume", response_model=ParsedResumeResponse)
 async def parse_resume(file: UploadFile = File(...)):
     content_type = file.content_type or ""
     # Also allow detection by filename extension as fallback
-    if content_type not in _ALLOWED_TYPES:
+    if content_type != "application/pdf":
         filename = file.filename or ""
         if filename.lower().endswith(".pdf"):
             content_type = "application/pdf"
-        elif filename.lower().endswith(".docx"):
-            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         else:
             raise HTTPException(
                 status_code=415,
-                detail="Unsupported file type. Please upload a PDF or DOCX file.",
+                detail="Unsupported file type. Please upload a PDF file.",
             )
 
     file_bytes = await file.read()
@@ -31,12 +24,11 @@ async def parse_resume(file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail="File too large. Maximum size is 10 MB.")
 
     try:
-        parser = _ALLOWED_TYPES[content_type]
-        text = parser(file_bytes)
+        text, html, file_b64, file_type = parse_pdf(file_bytes)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Failed to parse file: {exc}") from exc
 
     if not text.strip():
         raise HTTPException(status_code=422, detail="No text could be extracted from the file.")
 
-    return TextResponse(text=text)
+    return ParsedResumeResponse(text=text, html=html, file_b64=file_b64, file_type=file_type)

@@ -1,11 +1,15 @@
 import { useCallback, useState } from 'react';
 import { parseResume } from '../api/client';
 
-interface Props {
-  onDone: (resumeText: string) => void;
+interface ResumeUploadProps {
+  onDone: (resumeText: string, fileB64?: string, fileType?: string) => void;
 }
 
-export default function ResumeUpload({ onDone }: Props) {
+const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+] as const;
+
+const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,19 +17,17 @@ export default function ResumeUpload({ onDone }: Props) {
 
   const handleFile = useCallback(
     async (file: File) => {
-      const allowed = ['application/pdf',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       const ext = file.name.toLowerCase();
-      if (!allowed.includes(file.type) && !ext.endsWith('.pdf') && !ext.endsWith('.docx')) {
-        setError('Only PDF and DOCX files are supported.');
+      if (!ALLOWED_MIME_TYPES.includes(file.type as typeof ALLOWED_MIME_TYPES[number]) && !ext.endsWith('.pdf')) {
+        setError('Only PDF files are supported.');
         return;
       }
       setError(null);
       setFileName(file.name);
       setLoading(true);
       try {
-        const { text } = await parseResume(file);
-        onDone(text);
+        const parsed = await parseResume(file);
+        onDone(parsed.text, parsed.file_b64, parsed.file_type);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Upload failed.';
         setError(msg);
@@ -55,7 +57,7 @@ export default function ResumeUpload({ onDone }: Props) {
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-gray-800">Upload Your Resume</h2>
-      <p className="text-sm text-gray-500">Supported formats: PDF, DOCX (max 10 MB)</p>
+      <p className="text-sm text-gray-500">Supported format: PDF (max 10 MB)</p>
 
       <label
         className={`block border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors
@@ -66,7 +68,7 @@ export default function ResumeUpload({ onDone }: Props) {
       >
         <input
           type="file"
-          accept=".pdf,.docx"
+          accept=".pdf"
           className="hidden"
           onChange={onInputChange}
           disabled={loading}
@@ -104,4 +106,6 @@ export default function ResumeUpload({ onDone }: Props) {
       )}
     </div>
   );
-}
+};
+
+export default ResumeUpload;

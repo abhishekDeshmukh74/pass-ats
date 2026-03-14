@@ -1,0 +1,113 @@
+"""Agent 4 — Quality Assurance: validate replacements & remove keyword duplication."""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections import Counter
+
+from backend.models import TextReplacement
+from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM = """You are a QA reviewer for ATS resume optimisation.
+
+You receive:
+- The original resume text
+- A list of proposed {"old", "new"} replacements
+- The full JD keyword list
+
+Your job is to review and FIX every replacement to ensure quality:
+
+═══ CHECKS ═══
+
+1. VERBATIM OLD TEXT: Each "old" must appear EXACTLY in the original resume.
+   If it doesn't match, fix it to match the resume text exactly.
+
+2. KEYWORD DUPLICATION: Count how many times each JD keyword appears across ALL
+   "new" texts combined. If any keyword appears more than 2 times total:
+   - Replace excess occurrences with synonyms or rephrase
+   - Example: if "microservices" appears 5 times, keep it in the 2 most relevant
+     bullets and use "distributed services", "service-oriented", etc. in others
+
+3. LENGTH: Each "new" text should be within ±20% of its "old" text length.
+   If too long, cut filler words. If too short, add relevant detail.
+
+4. NATURALNESS: The "new" text must read naturally, not like keyword stuffing.
+
+5. NO IDENTICAL PAIRS: Remove any replacement where old == new.
+
+═══ RESPONSE FORMAT ═══
+
+{
+  "replacements": [
+    {"old": "verified exact text", "new": "deduplicated rewrite"}
+  ],
+  "fixes_applied": ["description of each fix made"]
+}
+
+Return ONLY valid JSON."""
+
+
+def qa_and_deduplicate(state: AgentState) -> dict:
+    """Node: validate old text accuracy, remove keyword duplication."""
+    llm = get_llm()
+
+    raw = state.get("raw_replacements", [])
+    keywords = state.get("jd_keywords", [])
+
+    if not raw:
+        logger.warning("QA agent: no raw replacements to review.")
+        return {"replacements": []}
+
+    # Pre-check: flag keyword duplication for the LLM
+    all_new_text = " ".join(r.get("new", "") for r in raw).lower()
+    freq = Counter()
+    for kw in keywords:
+        count = all_new_text.count(kw.lower())
+        if count > 2:
+            freq[kw] = count
+
+    duplication_note = ""
+    if freq:
+        duplication_note = "\n\nKEYWORD OVERUSE DETECTED (fix these):\n" + "\n".join(
+            f"- \"{kw}\" appears {c} times (max 2 allowed)"
+            for kw, c in freq.most_common(20)
+        )
+
+    resp = llm.invoke([
+        {"role": "system", "content": _SYSTEM},
+        {"role": "user", "content": (
+            f"## Original Resume\n\n{state['resume_text']}\n\n"
+            f"## JD Keywords\n\n{', '.join(keywords)}\n\n"
+            f"## Proposed Replacements\n\n{json.dumps(raw, indent=2)}"
+            f"{duplication_note}\n\n"
+            "Review and fix all replacements. Return the corrected JSON."
+        )},
+    ])
+
+    data = parse_llm_json(resp.content)
+    reviewed = data.get("replacements", [])
+    fixes = data.get("fixes_applied", [])
+
+    if fixes:
+        logger.info("QA agent: applied %d fixes: %s", len(fixes), "; ".join(fixes[:5]))
+
+    # Final programmatic dedup safety net
+    final: list[TextReplacement] = []
+    seen_old: set[str] = set()
+    for r in reviewed:
+        old = r.get("old", "").strip()
+        new = r.get("new", "").strip()
+        if not old or not new or old == new:
+            continue
+        if old in seen_old:
+            continue
+        seen_old.add(old)
+        final.append(TextReplacement(old=old, new=new))
+
+    logger.info("QA agent: %d → %d final replacements.", len(raw), len(final))
+
+    return {"replacements": final}

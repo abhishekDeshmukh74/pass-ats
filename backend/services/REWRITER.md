@@ -26,9 +26,11 @@ The output PDF preserves the original layout, fonts, colours, and formatting —
 
 - A LaTeX PDF with `LMRoman10-Regular` will have replacement text in `LMRoman10-Regular`
 - A Word PDF with `Calibri` will have replacement text in `Calibri`
-- Only when extraction fails does it fall back to Base-14 (`tiro`, `helv`, etc.)
+- Only when extraction fails **or the font is a subset missing glyphs for the replacement text** does it fall back to Base-14 (`tiro`, `helv`, etc.)
 
 The font cache is keyed by: full basefont name (e.g., `WRAHST+LMRoman10-Regular`), clean name without subset prefix (`LMRoman10-Regular`), and short PDF name (`F43`).
+
+**Glyph validation** (`_font_can_render`): Before using an extracted font, every non-space character in the replacement text is checked via `font.has_glyph(ord(ch))`. If any glyph is missing (common with subset fonts), the font is rejected and the style-matched Base-14 fallback is used instead — preventing garbled characters.
 
 ### Block-Scoped, Line-Aware Matching
 
@@ -39,7 +41,7 @@ Block 0 (summary): [Line0[spans], Line1[spans], ...]  ← match within lines of 
 Block 1 (bullet):  [Line0[spans], Line1[spans], ...]  ← match within lines of this block
 ```
 
-### Text Normalisation (`_norm`)
+### Text Normalisation (`_norm`) and Sanitisation (`_sanitize_text`)
 
 Both the `old` text from AI and the span text from the PDF are normalised before comparison:
 
@@ -48,6 +50,8 @@ Both the `old` text from AI and the span text from the PDF are normalised before
 - Whitespace collapse (`\s+` → single space)
 - **Spaces before punctuation** are removed (`typescript) ,` → `typescript),`) — crucial for LaTeX PDFs with inter-character spacing
 - Case-insensitive comparison
+
+**Output sanitisation** (`_sanitize_text`): Before insertion, the AI's replacement text is normalised to plain ASCII equivalents (smart quotes → straight, em/en dashes → hyphens, zero-width chars removed). This prevents rendering failures when the target font lacks glyphs for fancy Unicode characters.
 
 ### Line Info & Font Selection (`_line_info`)
 
@@ -65,13 +69,14 @@ For each matched line, `_line_info` returns `(x0, baseline, width, height, font_
 Instead of `insert_textbox` (which wraps text independently and produces different line breaks), the rewriter:
 
 1. Preserves the exact y-position of each original line
-2. Word-wraps the new text to fit each line's original width
+2. Word-wraps the new text using the **maximum line width** across matched lines (prevents short trailing lines from forcing awkward breaks)
 3. Inserts each line individually at `(x0, baseline)` via `TextWriter.append()`
 4. Per-line auto-shrink (up to ~34%) if a line still overflows
 
 ### Redaction Strategy
 
-- **One rect per matched group** (union of all line bboxes) → minimal extra drawing objects
+- **One rect per matched line** (tight bbox around content spans)
+- White fill `(1, 1, 1)` ensures clean removal of old glyphs with no remnants
 - `graphics=fitz.PDF_REDACT_IMAGE_NONE` → preserves decorative elements (horizontal lines, borders)
 - Operations grouped by text colour, one `TextWriter` per colour
 
@@ -89,9 +94,10 @@ Instead of `insert_textbox` (which wraps text independently and produces differe
 |---------|-------|-----|
 | PDF unchanged | AI `old` text doesn't match any spans | Check AI prompt; verify `_norm` handles the characters; check logs |
 | Text overlaps | Replacement text longer than original | Auto-fit scales down; prompt tells AI to keep ±20% length |
-| Wrong font | Embedded font not extractable | Falls back to Base-14; check `_build_font_cache` logs |
+| Wrong font | Embedded font is a subset missing glyphs for new text | `_font_can_render` detects this and falls back to Base-14 |
+| Garbled chars | AI produced smart quotes / em-dashes the font can't render | `_sanitize_text` maps to ASCII equivalents before insertion |
 | Huge combined bbox | Matching crossed blocks | Fixed by block-scoped matching |
-| Line-art removed | `apply_redactions` destroyed graphics | Fixed by `graphics=0` parameter |
+| Line-art removed | `apply_redactions` destroyed graphics | White-fill rects are per-line and tight; `graphics=IMAGE_NONE` preserves paths |
 | Spaces before punctuation break matching | LaTeX inter-char spacing | Fixed by `_norm` removing pre-punctuation spaces |
 
 ## Dependencies
