@@ -28,7 +28,7 @@ services:
 
   # ── Frontend (React / Vite) ────────────────────────────
   - type: web
-    name: pass-ats-frontend
+    name: pass-ats
     runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
