@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI
@@ -6,7 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.routers import resume, jd, generate, pdf  # noqa: E402
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(name)-30s  %(levelname)-7s  %(message)s",
+)
+
+from backend.routers import resume, jd, generate, pipeline  # noqa: E402
 
 app = FastAPI(title="pass-ats API", version="1.0.0")
 
@@ -23,7 +29,7 @@ app.add_middleware(
 app.include_router(resume.router, prefix="/api")
 app.include_router(jd.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
-app.include_router(pdf.router, prefix="/api")
+app.include_router(pipeline.router, prefix="/api")
 
 
 @app.get("/api/health")

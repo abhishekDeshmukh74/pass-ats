@@ -33,6 +33,12 @@ export interface ResumeData {
   experience: ExperienceItem[];
   education: EducationItem[];
   certifications: CertificationItem[];
+  ats_score_before?: number | null;
   ats_score?: number | null;
   matched_keywords?: string[];
+}
+
+export interface GenerateResponse {
+  resume: ResumeData;
+  rewritten_file_b64: string;
 }

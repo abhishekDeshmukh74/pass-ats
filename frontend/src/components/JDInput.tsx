@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { scrapeJd } from '../api/client';
 
-interface Props {
+interface JDInputProps {
   onDone: (jdText: string) => void;
 }
 
 type Tab = 'paste' | 'url';
 
-export default function JDInput({ onDone }: Props) {
+const TAB_LABELS: Record<Tab, string> = {
+  paste: 'Paste Text',
+  url: 'From URL',
+};
+
+const JDInput = ({ onDone }: JDInputProps) => {
   const [tab, setTab] = useState<Tab>('paste');
   const [pasteText, setPasteText] = useState('');
   const [url, setUrl] = useState('');
@@ -58,7 +63,7 @@ export default function JDInput({ onDone }: Props) {
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
-            {t === 'paste' ? 'Paste Text' : 'From URL'}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -111,4 +116,6 @@ export default function JDInput({ onDone }: Props) {
       )}
     </div>
   );
-}
+};
+
+export default JDInput;
