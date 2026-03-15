@@ -5,9 +5,9 @@ services:
     runtime: python
     region: oregon
     plan: free
-    rootDir: .
-    buildCommand: apt-get install -y --no-install-recommends texlive-xetex texlive-fonts-recommended texlive-latex-recommended texlive-latex-extra texlive-fonts-extra && pip install -r backend/requirements.txt
-    startCommand: bash backend/start.sh
+    rootDir: backend
+    buildCommand: apt-get update && apt-get install -y --no-install-recommends texlive-xetex texlive-fonts-recommended texlive-latex-recommended texlive-plain-generic fonts-liberation && pip install -r requirements.txt
+    startCommand: bash start.sh
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.11"
