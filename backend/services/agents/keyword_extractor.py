@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.llm import invoke_llm_json
 from backend.services.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,10 @@ RULES:
 
 def extract_keywords(state: AgentState) -> dict:
     """Node: extract JD keywords and categories."""
-    llm = get_llm()
-
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": f"## Job Description\n\n{state['jd_text']}"},
     ])
-
-    data = parse_llm_json(resp.content)
     keywords = list(set(data.get("keywords", [])))
     categories = data.get("categories", {})
 

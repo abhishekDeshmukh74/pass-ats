@@ -8,7 +8,7 @@ import re
 from collections import Counter
 
 from backend.models import TextReplacement
-from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.llm import invoke_llm_json
 from backend.services.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -73,8 +73,6 @@ Return ONLY valid JSON."""
 
 def qa_and_deduplicate(state: AgentState) -> dict:
     """Node: validate old text accuracy, remove keyword duplication."""
-    llm = get_llm()
-
     raw = state.get("raw_replacements", [])
     keywords = state.get("jd_keywords", [])
 
@@ -97,7 +95,7 @@ def qa_and_deduplicate(state: AgentState) -> dict:
             for kw, c in freq.most_common(20)
         )
 
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"## Original Resume\n\n{state['resume_text']}\n\n"
@@ -107,8 +105,6 @@ def qa_and_deduplicate(state: AgentState) -> dict:
             "Review and fix all replacements. Return the corrected JSON."
         )},
     ])
-
-    data = parse_llm_json(resp.content)
     reviewed = data.get("replacements", [])
     fixes = data.get("fixes_applied", [])
 

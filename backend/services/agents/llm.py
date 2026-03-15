@@ -53,9 +53,19 @@ def _repair_json(text: str) -> dict:
     )
 
 
-def parse_llm_json(text: str) -> dict:
+def parse_llm_json(text) -> dict:
     """Parse JSON from LLM output, stripping markdown fences if present."""
+    if text is None:
+        raise ValueError("LLM returned no content (None).")
+    if isinstance(text, list):
+        # Some providers return content as a list of content blocks
+        text = " ".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in text
+        )
     text = text.strip()
+    if not text:
+        raise ValueError("LLM returned an empty response.")
     m = _FENCE_RE.search(text)
     if m:
         text = m.group(1).strip()
@@ -63,6 +73,33 @@ def parse_llm_json(text: str) -> dict:
         return json.loads(text)
     except json.JSONDecodeError:
         return _repair_json(text)
+
+
+def invoke_llm_json(messages: list, *, retries: int = 2) -> dict:
+    """Invoke the shared LLM and return the response parsed as JSON.
+
+    Retries up to *retries* times (with brief exponential back-off) when the
+    model returns empty or unparseable content.
+    """
+    import time
+
+    llm = get_llm()
+    last_exc: Exception | None = None
+    for attempt in range(1 + retries):
+        try:
+            resp = llm.invoke(messages)
+            return parse_llm_json(resp.content)
+        except (ValueError, json.JSONDecodeError) as exc:
+            last_exc = exc
+            _logger.warning(
+                "LLM JSON parse failed (attempt %d/%d): %s",
+                attempt + 1, 1 + retries, exc,
+            )
+            if attempt < retries:
+                time.sleep(2 ** attempt)  # 1 s → 2 s
+    raise RuntimeError(
+        f"LLM failed to return valid JSON after {1 + retries} attempts: {last_exc}"
+    ) from last_exc
 
 
 _logger = logging.getLogger(__name__)

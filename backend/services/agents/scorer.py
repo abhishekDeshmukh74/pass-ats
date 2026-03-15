@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.llm import invoke_llm_json
 from backend.services.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -76,10 +76,9 @@ SCORING RULES:
 
 def score_before_rewrite(state: AgentState) -> dict:
     """Node: score the original resume BEFORE any rewriting."""
-    llm = get_llm()
     keywords = state.get("jd_keywords", [])
 
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SCORE_BEFORE_SYSTEM},
         {"role": "user", "content": (
             f"## Original Resume\n\n{state['resume_text']}\n\n"
@@ -87,8 +86,6 @@ def score_before_rewrite(state: AgentState) -> dict:
             "Score the original resume against these keywords."
         )},
     ])
-
-    data = parse_llm_json(resp.content)
     score = data.get("ats_score_before", 0)
     logger.info("ATS Pre-Rewrite Score: %d", score)
 
@@ -106,14 +103,12 @@ def _apply_replacements_to_text(resume_text: str, replacements: list) -> str:
 
 def score_and_extract(state: AgentState) -> dict:
     """Node: score the final rewritten resume and extract structured fields."""
-    llm = get_llm()
-
     replacements = state.get("replacements", [])
     rewritten_text = _apply_replacements_to_text(state["resume_text"], replacements)
 
     keywords = state.get("jd_keywords", [])
 
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"## Rewritten Resume\n\n{rewritten_text}\n\n"
@@ -122,8 +117,6 @@ def score_and_extract(state: AgentState) -> dict:
             "Score the rewritten resume and extract structured data."
         )},
     ])
-
-    data = parse_llm_json(resp.content)
 
     score = data.get("ats_score", 0)
     matched = data.get("matched_keywords", [])

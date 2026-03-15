@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.llm import invoke_llm_json
 from backend.services.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -76,8 +76,6 @@ that transform the resume to score above 90% on ATS keyword matching.
 
 def rewrite_sections(state: AgentState) -> dict:
     """Node: generate old→new replacement pairs."""
-    llm = get_llm()
-
     categories = state.get("keyword_categories", {})
     gap = state.get("gap_analysis", "")
 
@@ -86,7 +84,7 @@ def rewrite_sections(state: AgentState) -> dict:
         for cat, kws in categories.items()
     )
 
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"## Original Resume\n\n{state['resume_text']}\n\n"
@@ -102,8 +100,6 @@ def rewrite_sections(state: AgentState) -> dict:
             "Return only the JSON object."
         )},
     ])
-
-    data = parse_llm_json(resp.content)
     raw = data.get("replacements", [])
 
     # Filter out identical replacements

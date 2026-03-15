@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from backend.services.agents.llm import get_llm, parse_llm_json
+from backend.services.agents.llm import invoke_llm_json
 from backend.services.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -44,19 +44,15 @@ RULES:
 
 def analyse_resume(state: AgentState) -> dict:
     """Node: analyse resume sections and identify keyword gaps."""
-    llm = get_llm()
-
     keywords_str = ", ".join(state.get("jd_keywords", []))
 
-    resp = llm.invoke([
+    data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"## Original Resume\n\n{state['resume_text']}\n\n"
             f"## Target Keywords\n\n{keywords_str}"
         )},
     ])
-
-    data = parse_llm_json(resp.content)
     sections = data.get("sections", {})
     gap = data.get("gap_analysis", "")
     missing = data.get("missing_keywords", [])
