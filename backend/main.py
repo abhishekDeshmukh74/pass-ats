@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,10 +8,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(name)-30s  %(levelname)-7s  %(message)s",
-)
+def _configure_logging() -> None:
+    from pythonjsonlogger.json import JsonFormatter
+
+    handler = logging.StreamHandler(sys.stdout)
+    fmt = JsonFormatter(
+        fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
+        rename_fields={"asctime": "timestamp", "levelname": "level"},
+    )
+    handler.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.handlers.clear()
+    root.addHandler(handler)
+
+_configure_logging()
 
 from backend.routers import resume, jd, generate, pipeline  # noqa: E402
 

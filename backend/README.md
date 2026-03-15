@@ -193,10 +193,6 @@ MongoDB persistence for pipeline run tracking. All operations are **best-effort*
 
 LangGraph multi-agent pipeline with 7 sequential agents: keyword extraction → resume analysis → pre-rewrite scoring → rewriting → QA/dedup → final scoring → PDF compilation. See [agents/AGENTS.md](services/agents/AGENTS.md).
 
-### `groq_service.py` (superseded)
-
-Original monolithic AI service, now replaced by the LangGraph agents pipeline. Kept for reference. See [GROQ_SERVICE.md](services/GROQ_SERVICE.md).
-
 ## Running
 
 ```bash

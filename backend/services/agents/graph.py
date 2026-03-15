@@ -101,7 +101,7 @@ _builder.add_edge("compile_pdf", END)
 graph = _builder.compile()
 
 
-# ── Public API (drop-in replacement for groq_service.generate_resume) ─────
+# ── Public API ────────────────────────────────────────────────────────────
 
 def generate_resume(
     resume_text: str,

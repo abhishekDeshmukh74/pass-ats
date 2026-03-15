@@ -113,7 +113,17 @@ def qa_and_deduplicate(state: AgentState) -> dict:
 
     # Final programmatic dedup safety net
     _SKILLS_LINE = re.compile(r"^[A-Za-z][^:]{0,40}:\s*.+")
-    _TRAILING_PROSE = re.compile(r",?\s+(?:with|and|including|such as|plus)\b.+$", re.IGNORECASE)
+    # Only match trailing prose that starts with a conjunction and continues
+    # as a sentence (contains a verb/gerund or is 5+ words). This avoids
+    # stripping legit keyword phrases like "Docker, with Kubernetes, Terraform".
+    _TRAILING_PROSE = re.compile(
+        r",?\s+(?:with|and|including|such as|plus)\s+"
+        r"(?:experience|expertise|proficiency|knowledge|"
+        r"a focus|focus|emphasis|background|"
+        r"(?:\w+ing)\b)"  # gerund verb form (e.g. "ensuring", "building")
+        r".+$",
+        re.IGNORECASE,
+    )
 
     def _enforce_skills_format(old: str, new: str) -> str:
         """Strip trailing prose from skills-line replacements."""
@@ -124,7 +134,7 @@ def qa_and_deduplicate(state: AgentState) -> dict:
         looks_like_skills = old_clean.count(",") >= 1 and not old_clean.endswith(".")
         if not looks_like_skills:
             return new
-        # Strip any prose appended after the last real keyword
+        # Strip only sentence-like prose appended after keywords
         cleaned = _TRAILING_PROSE.sub("", new.strip()).rstrip(",; ").rstrip(".")
         if cleaned != new.strip():
             logger.debug("QA post-filter: stripped prose from skills line: %r → %r", new, cleaned)

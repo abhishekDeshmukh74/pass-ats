@@ -201,6 +201,17 @@ def _compile(tex_source: str) -> bytes:
     compiler = _find_compiler()
     logger.info("Compiling LaTeX with %s", compiler)
 
+    # XeTeX uses fontspec for font handling; fontenc with T1 encoding
+    # causes "Corrupted NFSS tables" errors.  Replace fontenc with fontspec
+    # when compiling with xelatex.
+    compiler_basename = os.path.basename(compiler).lower()
+    if "xelatex" in compiler_basename:
+        tex_source = re.sub(
+            r"\\usepackage\s*(\[[^\]]*\])?\s*\{fontenc\}",
+            r"\\usepackage{fontspec}",
+            tex_source,
+        )
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tex_path = os.path.join(tmpdir, "resume.tex")
         with open(tex_path, "w", encoding="utf-8") as fh:
