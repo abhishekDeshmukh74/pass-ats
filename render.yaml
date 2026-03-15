@@ -1,0 +1,42 @@
+services:
+  # ── Backend (FastAPI) ──────────────────────────────────
+  - type: web
+    name: pass-ats-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: bash backend/start.sh
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: GROQ_API_KEYS
+        sync: false          # comma-separated Groq API keys
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: MONGODB_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: LLM_PROVIDER
+        value: groq
+      - key: ALLOWED_ORIGINS
+        sync: false          # set to your frontend URL after deploy
+
+  # ── Frontend (React / Vite) ────────────────────────────
+  - type: web
+    name: pass-ats-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://pass-ats-api.onrender.com/api/*
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
