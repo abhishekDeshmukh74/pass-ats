@@ -56,12 +56,13 @@ graph TD
 
 ## Key Improvements
 
-1. **Hybrid Scoring** — Combines deterministic word-boundary regex matching (60% weight) with LLM semantic scoring (40% weight) for accurate, verifiable ATS scores.
-2. **Priority Keywords** — Extracts `required_skills` vs `preferred_skills` from JD so the rewriter prioritises must-have keywords.
-3. **Missing Keyword Focus** — The rewriter receives explicit lists of MISSING keywords (not all keywords) with priority levels (REQUIRED / PREFERRED / OTHER).
-4. **Conditional Refinement Loop** — If the first-pass score is below 90, a focused refinement agent injects still-missing keywords into the already-rewritten resume.
-5. **AI Phrase Cleanup** — Replaces AI-sounding buzzwords ("spearheaded", "leveraged", "synergized") with simpler human-sounding alternatives.
-6. **Algorithmic Keyword Matcher** — `keyword_matcher.py` provides deterministic word-boundary matching to verify which keywords actually appear in text.
+1. **Enhanced Algorithmic Scoring** — Uses `rapidfuzz` for multi-signal keyword matching: exact word-boundary, synonym/abbreviation expansion (50+ tech aliases), and fuzzy matching for typos/variations. LLM is used only for structured data extraction, not scoring.
+2. **Section-Aware Scoring** — Keywords found in high-value sections (title 1.4×, summary 1.3×, skills 1.2×) receive placement bonuses, reflecting real ATS behaviour.
+3. **Keyword Stuffing Detection** — Penalises resumes that repeat keywords excessively (>4 occurrences), deducting up to 15 points.
+4. **Priority Keywords** — Extracts `required_skills` vs `preferred_skills` from JD so the rewriter prioritises must-have keywords.
+5. **Missing Keyword Focus** — The rewriter receives explicit lists of MISSING keywords (not all keywords) with priority levels (REQUIRED / PREFERRED / OTHER).
+6. **Conditional Refinement Loop** — If the first-pass score is below 90, a focused refinement agent injects still-missing keywords into the already-rewritten resume.
+7. **AI Phrase Cleanup** — Replaces AI-sounding buzzwords ("spearheaded", "leveraged", "synergized") with simpler human-sounding alternatives.
 
 ## Agent Details
 
@@ -87,13 +88,17 @@ Extracts 30–60 unique keywords from the job description and categorises them i
 
 ### Agent 3 — Pre-Rewrite Scorer (`scorer.py`)
 
-**Input**: `resume_text`, `jd_keywords`, `keyword_categories`
+**Input**: `resume_text`, `jd_keywords`, `keyword_categories`, `resume_sections`
 **Output**: `ats_score_before`, `missing_keywords`
 
-Scores the **original** resume using **hybrid scoring**:
-- Algorithmic: word-boundary regex matching with category weights (tech skills 1.5x)
-- LLM: semantic keyword coverage assessment
-- Final score: conservative estimate (lower of LLM and algorithmic)
+Scores the **original** resume using **multi-signal algorithmic matching** (via `rapidfuzz`):
+- **Exact**: word-boundary regex matching
+- **Synonym**: 50+ tech abbreviation expansions (e.g. `k8s` → `kubernetes`, `JS` → `javascript`)
+- **Fuzzy**: rapidfuzz token matching (≥80% similarity threshold) for typos/variations
+- **Category weights**: tech skills 1.5×, certifications 1.25×
+- **Section placement**: keywords in title/summary/skills get bonus weight
+- **Stuffing penalty**: -3 pts per keyword appearing >4 times (max -15)
+- LLM provides a secondary score; final = conservative min(LLM, algorithmic)
 - Also identifies which keywords are missing from the original resume
 
 ### Agent 4 — Rewriter (`rewriter_agent.py`)
@@ -124,13 +129,17 @@ Validates and fixes:
 
 ### Agent 6 — Final Scorer (`scorer.py`)
 
-**Input**: `resume_text`, `jd_keywords`, `jd_text`, `replacements`, `keyword_categories`
+**Input**: `resume_text`, `jd_keywords`, `jd_text`, `replacements`, `keyword_categories`, `resume_sections`
 **Output**: `ats_score`, `matched_keywords`, `algorithmic_score`, `still_missing_keywords`, `name`, `email`, `skills`, `experience`, etc.
 
 - Applies replacements to produce the "final resume" text
-- Runs **hybrid scoring**: 60% algorithmic (word-boundary) + 40% LLM (semantic)
+- Runs **multi-signal algorithmic scoring** via `rapidfuzz`:
+  - Exact word-boundary + synonym expansion + fuzzy matching
+  - Category weights (tech 1.5×) + section placement bonuses
+  - Keyword stuffing penalty (up to -15 pts)
+- LLM is used **only for structured data extraction** (name, skills, experience, etc.) — not for scoring
 - Reports `still_missing_keywords` used by the refinement loop
-- Extracts structured fields needed by `ResumeData`
+- Match details logged: each keyword shows match type (exact/synonym/fuzzy) and confidence
 
 ### Conditional Refinement (if score < 90)
 

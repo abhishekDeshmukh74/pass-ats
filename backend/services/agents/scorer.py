@@ -15,13 +15,11 @@ _SYSTEM = """You are an ATS scoring and resume parsing specialist.
 You receive the fully rewritten resume text.
 
 Your tasks:
-1. Score the resume against the JD keywords (0-100).
-2. List all matched keywords.
-3. Extract structured resume data for the API response.
+1. List all matched keywords.
+2. Extract structured resume data for the API response.
 
 Return ONLY valid JSON:
 {
-  "ats_score": 92,
   "matched_keywords": ["keyword1", "keyword2"],
   "name": "string",
   "email": "string or null",
@@ -51,12 +49,7 @@ Return ONLY valid JSON:
     }
   ],
   "certifications": []
-}
-
-SCORING RULES:
-- Count what percentage of JD keywords appear in the final resume.
-- Weight technical skills and job-title keywords more heavily.
-- Do NOT inflate the score — be accurate."""
+}"""
 
 
 _SCORE_BEFORE_SYSTEM = """You are an ATS scoring specialist.
@@ -75,18 +68,42 @@ SCORING RULES:
 - Do NOT inflate the score — be accurate."""
 
 
+def _build_sections_map(state: AgentState) -> dict[str, str] | None:
+    """Extract a section-name → text mapping from the resume analyser output."""
+    raw = state.get("resume_sections")
+    if not raw or not isinstance(raw, dict):
+        return None
+    # The analyser stores sections as {name: text} or {name: {text: ...}}.
+    sections: dict[str, str] = {}
+    for name, body in raw.items():
+        if isinstance(body, str):
+            sections[name] = body
+        elif isinstance(body, dict) and "text" in body:
+            sections[name] = body["text"]
+    return sections or None
+
+
 def score_before_rewrite(state: AgentState) -> dict:
     """Node: score the original resume BEFORE any rewriting."""
     keywords = state.get("jd_keywords", [])
     categories = state.get("keyword_categories", {})
+    sections = _build_sections_map(state)
 
-    # Algorithmic score: deterministic word-boundary matching
+    # Algorithmic score: fuzzy + synonym + exact matching
     algo_result = calculate_keyword_match(
-        state["resume_text"], keywords, categories=categories,
+        state["resume_text"], keywords,
+        categories=categories,
+        sections=sections,
     )
     logger.info(
-        "ATS Pre-Rewrite Algorithmic: %.1f%% (%d matched, %d missing)",
-        algo_result.match_percentage, len(algo_result.matched), len(algo_result.missing),
+        "ATS Pre-Rewrite Algorithmic: %.1f%% (%d matched [%d exact, %d synonym, %d fuzzy], %d missing, stuffing=%.1f)",
+        algo_result.match_percentage,
+        len(algo_result.matched),
+        algo_result.exact_count,
+        algo_result.synonym_count,
+        algo_result.fuzzy_count,
+        len(algo_result.missing),
+        algo_result.stuffing_penalty,
     )
 
     data = invoke_llm_json([
@@ -126,15 +143,35 @@ def score_and_extract(state: AgentState) -> dict:
 
     keywords = state.get("jd_keywords", [])
     categories = state.get("keyword_categories", {})
+    sections = _build_sections_map(state)
 
-    # Algorithmic score: deterministic word-boundary matching
+    # Algorithmic score: fuzzy + synonym + exact matching with section awareness
     algo_result = calculate_keyword_match(
-        rewritten_text, keywords, categories=categories,
+        rewritten_text, keywords,
+        categories=categories,
+        sections=sections,
     )
     logger.info(
-        "ATS Post-Rewrite Algorithmic: %.1f%% (%d matched, %d missing)",
-        algo_result.match_percentage, len(algo_result.matched), len(algo_result.missing),
+        "ATS Post-Rewrite Algorithmic: %.1f%% (%d matched [%d exact, %d synonym, %d fuzzy], "
+        "%d missing, stuffing=%.1f)",
+        algo_result.match_percentage,
+        len(algo_result.matched),
+        algo_result.exact_count,
+        algo_result.synonym_count,
+        algo_result.fuzzy_count,
+        len(algo_result.missing),
+        algo_result.stuffing_penalty,
     )
+    if algo_result.section_scores:
+        logger.info("Section scores: %s", algo_result.section_scores)
+
+    # Log fuzzy/synonym matches for transparency
+    for d in algo_result.match_details:
+        if d.match_type in ("synonym", "fuzzy"):
+            logger.debug(
+                "  %s match: '%s' → '%s' (%.0f%%)",
+                d.match_type, d.keyword, d.matched_form, d.confidence,
+            )
 
     data = invoke_llm_json([
         {"role": "system", "content": _SYSTEM},
@@ -142,24 +179,30 @@ def score_and_extract(state: AgentState) -> dict:
             f"## Rewritten Resume\n\n{rewritten_text}\n\n"
             f"## JD Keywords\n\n{', '.join(keywords)}\n\n"
             f"## Job Description\n\n{state['jd_text']}\n\n"
-            "Score the rewritten resume and extract structured data."
+            "Extract structured resume data and list matched keywords."
         )},
     ])
 
-    llm_score = data.get("ats_score", 0)
-
-    # Use the algorithmic score as primary (it's deterministic and verifiable),
-    # but average with LLM score to account for semantic matches the regex misses
-    algo_pct = algo_result.match_percentage
-    blended_score = int(round(algo_pct * 0.6 + llm_score * 0.4))
+    # The algorithmic score is now the primary signal — it handles exact,
+    # synonym, and fuzzy matching with category weights, section placement
+    # bonuses, and stuffing penalties.  The LLM is used only for structured
+    # data extraction, not for scoring.
+    blended_score = int(round(algo_result.match_percentage))
     matched = algo_result.matched  # Use algorithmic matched list (verifiable)
 
-    logger.info("ATS Scorer: blended=%d (algo=%.1f, llm=%d), matched=%d keywords.",
-                blended_score, algo_pct, llm_score, len(matched))
+    logger.info(
+        "ATS Scorer: score=%d (exact=%d, synonym=%d, fuzzy=%d, stuffing=-%.1f), matched=%d keywords.",
+        blended_score,
+        algo_result.exact_count,
+        algo_result.synonym_count,
+        algo_result.fuzzy_count,
+        algo_result.stuffing_penalty,
+        len(matched),
+    )
 
     return {
         "ats_score": blended_score,
-        "algorithmic_score": algo_pct,
+        "algorithmic_score": algo_result.match_percentage,
         "matched_keywords": matched,
         "still_missing_keywords": algo_result.missing,
         "name": data.get("name", ""),
