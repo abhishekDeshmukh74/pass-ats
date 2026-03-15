@@ -10,7 +10,7 @@ services:
     startCommand: bash backend/start.sh
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11"
+        value: "3.11.11"
       - key: GROQ_API_KEYS
         sync: false          # comma-separated Groq API keys
       - key: GROQ_MODEL
