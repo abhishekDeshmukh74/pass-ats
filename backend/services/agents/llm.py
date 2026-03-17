@@ -262,6 +262,7 @@ def get_llm():
     Raises:
         RuntimeError: If the required API key env var is not set.
     """
+    global _llm_instance
     if _llm_instance is not None:
         return _llm_instance
 
