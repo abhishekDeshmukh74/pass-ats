@@ -1,4 +1,4 @@
-"""LangGraph pipeline — 13-node multi-agent graph for ATS resume optimisation.
+"""LangGraph pipeline — 14-node multi-agent graph for ATS resume optimisation.
 
 Flow:
   START
@@ -12,6 +12,7 @@ Flow:
         optimize_experience
       )
     → merge_resume        (Combine optimized sections)
+    → dedup_optimizer     (Replace overused verbs with synonyms)
     → truth_guard         (Verify truthfulness)
     → critic              (Quality gate)
     → conditional:
@@ -51,6 +52,7 @@ from backend.services.agents.skills_optimizer import optimize_skills_node
 from backend.services.agents.bullet_rewriter import optimize_experience_node
 from backend.services.agents.truth_guard import truth_guard_node
 from backend.services.agents.critic import critic_node
+from backend.services.agents.dedup_optimizer import dedup_optimizer_node
 from backend.services.agents.formatter import export_node
 from backend.services.agents.pdf_compiler import compile_pdf
 
@@ -79,6 +81,7 @@ _AGENT_INPUT_KEYS: dict[str, list[str]] = {
     "optimize_skills": ["parsed_resume", "parsed_jd", "gap_report"],
     "optimize_experience": ["parsed_resume", "parsed_jd", "gap_report"],
     "merge_resume": ["parsed_resume", "optimized_summary", "optimized_skills", "optimized_experience"],
+    "dedup_optimizer": ["draft_resume"],
     "truth_guard": ["parsed_resume", "draft_resume"],
     "critic": ["draft_resume", "parsed_jd", "baseline_score", "truth_report"],
     "rewrite_router": ["critic_report", "draft_resume"],
@@ -335,8 +338,9 @@ _builder.add_node("optimize_summary", _tracked("optimize_summary", optimize_summ
 _builder.add_node("optimize_skills", _tracked("optimize_skills", optimize_skills_node))
 _builder.add_node("optimize_experience", _tracked("optimize_experience", optimize_experience_node))
 
-# Stage 5: Merge + Safety
+# Stage 5: Merge + Dedup + Safety
 _builder.add_node("merge_resume", _tracked("merge_resume", _merge_resume_node))
+_builder.add_node("dedup_optimizer", _tracked("dedup_optimizer", dedup_optimizer_node))
 _builder.add_node("truth_guard", _tracked("truth_guard", truth_guard_node))
 
 # Stage 6: Review
@@ -365,9 +369,10 @@ _builder.add_edge("baseline_score", "optimize_summary")
 _builder.add_edge("optimize_summary", "optimize_skills")
 _builder.add_edge("optimize_skills", "optimize_experience")
 
-# Merge → Truth Guard → conditional
+# Merge → Dedup → Truth Guard → conditional
 _builder.add_edge("optimize_experience", "merge_resume")
-_builder.add_edge("merge_resume", "truth_guard")
+_builder.add_edge("merge_resume", "dedup_optimizer")
+_builder.add_edge("dedup_optimizer", "truth_guard")
 
 # Truth guard → conditional: pass → critic, fail → rewrite_router
 _builder.add_conditional_edges("truth_guard", _after_truth_guard, {
@@ -404,7 +409,7 @@ def generate_resume(
     resume_file_b64: str = "",
     resume_file_type: str = "pdf",
 ) -> tuple[ResumeData, str]:
-    """Run the full 13-node multi-agent pipeline.
+    """Run the full 14-node multi-agent pipeline.
 
     This is the **public API** of the agents package, re-exported by
     ``__init__.py`` and called by the ``/api/generate-resume`` endpoint.
@@ -413,8 +418,8 @@ def generate_resume(
 
         parse_resume → analyze_jd → compute_gap → baseline_score
         → optimize_summary → optimize_skills → optimize_experience
-        → merge_resume → truth_guard → [critic] → [final_score]
-        → export → compile_pdf → END
+        → merge_resume → dedup_optimizer → truth_guard → [critic]
+        → [final_score] → export → compile_pdf → END
 
     The truth guard and critic nodes can route back to targeted optimizers
     for up to 2 revision cycles.
@@ -440,7 +445,7 @@ def generate_resume(
         Exception: Any unhandled error during pipeline execution (logged
                    to MongoDB before re-raising).
     """
-    logger.info("Starting LangGraph multi-agent pipeline (13 nodes).")
+    logger.info("Starting LangGraph multi-agent pipeline (14 nodes).")
 
     run_id = create_pipeline_run(resume_text, jd_text)
     token = _current_run_id.set(run_id)

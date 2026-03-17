@@ -2,7 +2,7 @@
 
 ## Overview
 
-The AI logic uses **LangGraph** to orchestrate a **13-node multi-agent pipeline with conditional revision loops**. Each agent is a standalone node with a single responsibility, reading from and writing to a shared `ResumeGraphState` TypedDict.
+The AI logic uses **LangGraph** to orchestrate a **14-node multi-agent pipeline with conditional revision loops**. Each agent is a standalone node with a single responsibility, reading from and writing to a shared `ResumeGraphState` TypedDict.
 
 The pipeline combines **LLM-based intelligence** (via Groq or Gemini) with **deterministic scoring utilities** (`tools.py`) for a hybrid approach: the LLM handles text understanding, rewriting, and semantic evaluation, while `tools.py` provides repeatable keyword coverage, bullet quality, and ATS format checks.
 
@@ -11,17 +11,18 @@ The pipeline combines **LLM-based intelligence** (via Groq or Gemini) with **det
 ```
 parse_resume → analyze_jd → compute_gap → baseline_score
 → optimize_summary → optimize_skills → optimize_experience
-→ merge_resume → truth_guard →[pass]→ critic →[pass]→ final_score
-                       │                  │
-                       └──[fail]──→ rewrite_router ←──[fail]──┘
-                                        │
-                              ┌─────────┼─────────┐
-                              ▼         ▼         ▼
-                        optimize_   optimize_  optimize_
-                        experience  summary    skills
-                              └─────────┼─────────┘
-                                        ▼
-                                   merge_resume  (loop, max 2 revisions)
+→ merge_resume → dedup_optimizer → truth_guard →[pass]→ critic →[pass]→ final_score
+                                          │                  │
+                                          └──[fail]──→ rewrite_router ←──[fail]──┘
+                                                       │
+                                             ┌─────────┼─────────┐
+                                             │         │         │
+                                             ▼         ▼         ▼
+                                       optimize_   optimize_  optimize_
+                                       experience  summary    skills
+                                             └─────────┼─────────┘
+                                                       ▼
+                                                  merge_resume  (loop, max 2 revisions)
 
 final_score → export → compile_pdf → END
 ```
@@ -38,6 +39,7 @@ graph TD
     optimize_skills["6. Optimize Skills\n(skills_optimizer.py)\n→ optimized_skills"]
     optimize_experience["7. Optimize Experience\n(bullet_rewriter.py)\n→ optimized_experience"]
     merge_resume["8. Merge Resume\n(graph.py)\n→ draft_resume"]
+    dedup_optimizer["8b. Dedup Optimizer\n(dedup_optimizer.py)\n→ draft_resume (deduped)"]
     truth_guard["9. Truth Guard\n(truth_guard.py)\n→ truth_report"]
     critic["10. Critic\n(critic.py)\n→ critic_report"]
     rewrite_router["Rewrite Router\n(graph.py)\n→ revision_count++"]
@@ -55,7 +57,8 @@ graph TD
     optimize_skills --> optimize_experience
 
     optimize_experience --> merge_resume
-    merge_resume --> truth_guard
+    merge_resume --> dedup_optimizer
+    dedup_optimizer --> truth_guard
 
     truth_guard -->|"supported=True"| critic
     truth_guard -->|"supported=False\n& revisions < 2"| rewrite_router
@@ -79,6 +82,7 @@ graph TD
     style optimize_skills fill:#fce4ec,stroke:#c62828
     style optimize_experience fill:#fce4ec,stroke:#c62828
     style merge_resume fill:#e8eaf6,stroke:#283593
+    style dedup_optimizer fill:#e1f5fe,stroke:#0277bd
     style truth_guard fill:#ffccbc,stroke:#bf360c
     style critic fill:#f3e5f5,stroke:#6a1b9a
     style rewrite_router fill:#ffebee,stroke:#b71c1c
@@ -232,6 +236,7 @@ Applies validated replacements to the original file:
 ### Internal Nodes (not agents)
 
 - **`merge_resume`** (`graph.py`) — Combines `optimized_summary`, `optimized_skills`, and `optimized_experience` into `draft_resume`.
+- **`dedup_optimizer`** (`dedup_optimizer.py`) — Scans the full `draft_resume` for action verbs/phrases appearing >3 times and replaces excess occurrences with contextually appropriate synonyms via LLM. Runs deterministic frequency check first; only calls LLM if duplicates are found.
 - **`rewrite_router`** (`graph.py`) — Increments `revision_count` and routes to targeted optimizer based on critic/truth guard feedback.
 
 ## Conditional Edges

@@ -2,7 +2,7 @@
 
 ## Overview
 
-FastAPI backend for the pass-ats resume tailor. Receives a PDF or LaTeX resume and job description, runs a **LangGraph 13-node multi-agent pipeline** (10 AI agents + 3 internal nodes) to rewrite resume content for ATS optimisation, and returns a modified PDF preserving the original layout.
+FastAPI backend for the pass-ats resume tailor. Receives a PDF or LaTeX resume and job description, runs a **LangGraph 14-node multi-agent pipeline** (11 AI agents + 3 internal nodes) to rewrite resume content for ATS optimisation, and returns a modified PDF preserving the original layout.
 
 ## Directory Structure
 
@@ -33,6 +33,7 @@ backend/
         ├── bullet_rewriter.py    # Agent 5: Rewrite experience bullets (Action+Tech+Scope+Result)
         ├── summary_optimizer.py  # Agent 6: Generate ATS-optimized summary
         ├── skills_optimizer.py   # Agent 7: Normalise and align skills
+        ├── dedup_optimizer.py    # Dedup: replace overused verbs with synonyms
         ├── truth_guard.py        # Agent 8: Truthfulness verification (safety)
         ├── scorer.py             # Agents 4 & 11: Hybrid ATS scoring (baseline + final)
         ├── critic.py             # Agent 9: Quality gate with revision routing
@@ -61,6 +62,7 @@ Frontend                    Backend
    │                          │     6.  optimize_skills   → normalised skills
    │                          │     7.  optimize_experience → rewritten bullets
    │                          │     8.  merge_resume      → combined draft
+   │                          │     8b. dedup_optimizer   → synonym deduplication
    │                          │     9.  truth_guard       → truthfulness check
    │                          │    10.  critic            → quality gate
    │                          │    11.  final_score       → post-optimisation ATS score
@@ -73,7 +75,7 @@ Frontend                    Backend
 
 ## LangGraph Pipeline
 
-The AI logic is split into 13 nodes using LangGraph's `StateGraph`, with conditional revision loops (max 2 revisions):
+The AI logic is split into 14 nodes using LangGraph's `StateGraph`, with conditional revision loops (max 2 revisions):
 
 | # | Agent | Node Name | File | Purpose |
 |---|-------|-----------|------|---------|
@@ -85,6 +87,7 @@ The AI logic is split into 13 nodes using LangGraph's `StateGraph`, with conditi
 | 6 | Skills Optimizer | `optimize_skills` | `skills_optimizer.py` | Normalise and align skills list |
 | 7 | Bullet Rewriter | `optimize_experience` | `bullet_rewriter.py` | Rewrite bullets (Action+Tech+Scope+Result) |
 | 8 | — | `merge_resume` | `graph.py` | Combine optimized sections into draft |
+| 8b | Dedup Optimizer | `dedup_optimizer` | `dedup_optimizer.py` | Replace overused verbs (>3×) with synonyms |
 | 9 | Truth Guard | `truth_guard` | `truth_guard.py` | Verify claims against original resume |
 | 10 | Critic | `critic` | `critic.py` | Quality gate — route to revision or proceed |
 | — | — | `rewrite_router` | `graph.py` | Route revision to specific optimizer |
