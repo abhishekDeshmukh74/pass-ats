@@ -50,6 +50,7 @@ const HomePage = () => {
   const [jdText, setJdText] = useState('');
   const [resumeFileB64, setResumeFileB64] = useState('');
   const [resumeFileType, setResumeFileType] = useState('pdf');
+  const [resumeFileName, setResumeFileName] = useState('');
   const [generatedResume, setGeneratedResume] = useState<ResumeData | null>(null);
   const [rewrittenFileB64, setRewrittenFileB64] = useState('');
   const [genError, setGenError] = useState<string | null>(null);
@@ -64,10 +65,11 @@ const HomePage = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
-  const handleResumeUploaded = (text: string, fileB64?: string, fileType?: string) => {
+  const handleResumeUploaded = (text: string, fileB64?: string, fileType?: string, fileName?: string) => {
     setResumeText(text);
     setResumeFileB64(fileB64 ?? '');
     setResumeFileType(fileType ?? 'pdf');
+    setResumeFileName(fileName ?? '');
     setStep(2);
   };
 
@@ -152,6 +154,7 @@ const HomePage = () => {
     setJdText('');
     setResumeFileB64('');
     setResumeFileType('pdf');
+    setResumeFileName('');
     setGeneratedResume(null);
     setRewrittenFileB64('');
     setGenError(null);
@@ -257,6 +260,7 @@ const HomePage = () => {
                   resume={generatedResume}
                   onStartOver={handleStartOver}
                   rewrittenFileB64={rewrittenFileB64}
+                  originalFileName={resumeFileName}
                 />
                 {/* Cover letter panel */}
                 {resumeText && jdText && (

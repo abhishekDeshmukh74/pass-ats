@@ -5,6 +5,7 @@ interface ResumePreviewProps {
   resume: ResumeData;
   onStartOver: () => void;
   rewrittenFileB64: string;
+  originalFileName?: string;
 }
 
 interface ScoreBadgeProps {
@@ -66,7 +67,7 @@ const ScoreBadge = ({ score, scoreBefore }: ScoreBadgeProps) => {
   );
 };
 
-const ResumePreview = ({ resume, onStartOver, rewrittenFileB64 }: ResumePreviewProps) => {
+const ResumePreview = ({ resume, onStartOver, rewrittenFileB64, originalFileName }: ResumePreviewProps) => {
   const [dlError, setDlError] = useState<string | null>(null);
 
   // Convert base64 PDF to a blob URL for iframe preview
@@ -94,7 +95,10 @@ const ResumePreview = ({ resume, onStartOver, rewrittenFileB64 }: ResumePreviewP
       }
       const blob = new Blob([byteArray], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const safeName = resume.name.replace(/\s+/g, '_') || 'resume';
+      const baseName = resume.name
+        || (originalFileName ? originalFileName.replace(/\.[^.]+$/, '') : '')
+        || 'resume';
+      const safeName = baseName.replace(/\s+/g, '_');
       const a = document.createElement('a');
       a.href = url;
       a.download = `${safeName}_tailored.pdf`;

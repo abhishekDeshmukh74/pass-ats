@@ -196,6 +196,53 @@ def rewrite_tex(tex_bytes: bytes, resume: ResumeData) -> bytes:
     return _compile(tex_source)
 
 
+def _tlmgr_install(packages: list[str]) -> None:
+    """Attempt to install *packages* via tlmgr (TeX Live package manager).
+
+    Tries user-mode first (no sudo required); falls back to system-mode.
+    If tlmgr itself needs updating (exit 255 + "needs to be updated"), runs
+    ``tlmgr update --self`` first then retries.
+    Silently skips if tlmgr is not found.
+    """
+    tlmgr = shutil.which("tlmgr")
+    if not tlmgr:
+        logger.warning("tlmgr not found; cannot auto-install packages: %s", packages)
+        return
+
+    def _run(args: list[str]) -> "subprocess.CompletedProcess[bytes]":
+        return subprocess.run(args, capture_output=True, timeout=120)
+
+    def _needs_self_update(result: "subprocess.CompletedProcess[bytes]") -> bool:
+        out = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+        return result.returncode == 255 and "needs to be updated" in out
+
+    for mode_flag in (["--usermode"], []):
+        try:
+            result = _run([tlmgr, "install", *mode_flag, *packages])
+            # tlmgr itself may be outdated; update self then retry once
+            if _needs_self_update(result):
+                logger.info("Updating tlmgr itself before installing packages.")
+                _run([tlmgr, "update", *mode_flag, "--self"])
+                result = _run([tlmgr, "install", *mode_flag, *packages])
+            if result.returncode == 0:
+                logger.info(
+                    "tlmgr installed packages %s (mode=%s)",
+                    packages,
+                    "user" if mode_flag else "system",
+                )
+                return
+            # user-mode may fail if not initialised; try system mode next
+            logger.debug("tlmgr %s exit %d", mode_flag, result.returncode)
+        except Exception as exc:
+            logger.debug("tlmgr attempt failed: %s", exc)
+    logger.warning("Failed to auto-install LaTeX packages via tlmgr: %s", packages)
+
+
+def _missing_packages(log_output: str) -> list[str]:
+    """Extract package names from 'File `foo.sty' not found' errors."""
+    return re.findall(r"File `([^']+?)\.sty' not found", log_output)
+
+
 def _compile(tex_source: str) -> bytes:
     """Write *tex_source* to a temp dir, run xelatex twice, return PDF bytes."""
     compiler = _find_compiler()
@@ -232,6 +279,7 @@ def _compile(tex_source: str) -> bytes:
         compile_args.append(tex_path)
 
         last_result = None
+        auto_installed = False
         for pass_num in range(1, 3):  # two passes for cross-refs / TOC
             last_result = subprocess.run(
                 compile_args,
@@ -242,6 +290,32 @@ def _compile(tex_source: str) -> bytes:
             logger.debug(
                 "xelatex pass %d exit code: %d", pass_num, last_result.returncode,
             )
+            # On the first pass, detect and auto-install missing packages then
+            # re-run rather than surfacing the error immediately.
+            if pass_num == 1 and last_result.returncode != 0 and not auto_installed:
+                combined = (
+                    last_result.stdout.decode("utf-8", errors="replace")
+                    + last_result.stderr.decode("utf-8", errors="replace")
+                )
+                missing = _missing_packages(combined)
+                if missing:
+                    logger.info("Auto-installing missing LaTeX packages: %s", missing)
+                    _tlmgr_install(missing)
+                    auto_installed = True
+                    # Redo both passes after installing packages
+                    for retry_pass in range(1, 3):
+                        last_result = subprocess.run(
+                            compile_args,
+                            capture_output=True,
+                            timeout=120,
+                            cwd=tmpdir,
+                        )
+                        logger.debug(
+                            "xelatex retry pass %d exit code: %d",
+                            retry_pass,
+                            last_result.returncode,
+                        )
+                    break  # exit outer loop; retry loop handled both passes
 
         pdf_path = os.path.join(tmpdir, "resume.pdf")
         if not os.path.exists(pdf_path):

@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { parseResume } from '../api/client';
 
 interface ResumeUploadProps {
-  onDone: (resumeText: string, fileB64?: string, fileType?: string) => void;
+  onDone: (resumeText: string, fileB64?: string, fileType?: string, fileName?: string) => void;
 }
 
 const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
@@ -23,7 +23,7 @@ const ResumeUpload = ({ onDone }: ResumeUploadProps) => {
       setLoading(true);
       try {
         const parsed = await parseResume(file);
-        onDone(parsed.text, parsed.file_b64, parsed.file_type);
+        onDone(parsed.text, parsed.file_b64, parsed.file_type, file.name);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Upload failed.';
         setError(msg);
