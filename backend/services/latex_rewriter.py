@@ -86,6 +86,93 @@ def _build_flexible_pattern(plain_text: str) -> str:
     return "".join(parts)
 
 
+# Inline LaTeX formatting commands whose content becomes plain text.
+_INLINE_CMDS_RE = re.compile(
+    r"\\(?:textbf|textit|texttt|textrm|textsf|emph|underline|strong)\{([^}]*)\}"
+)
+# LaTeX special-character escapes: \%, \&, \$, \#, \_
+_LATEX_SPECIAL_RE = re.compile(r"\\([%&$#_])")
+
+
+def _strip_formatting(tex: str) -> tuple[str, list[int]]:
+    """Strip inline LaTeX formatting from *tex*, returning the plain text and
+    a position map from plain-text indices back to original source indices.
+
+    The position map ``pos_map`` has ``len(plain) + 1`` entries where
+    ``pos_map[i]`` is the index in *tex* corresponding to ``plain[i]``.
+    """
+    # Multi-pass: keep stripping until no more formatting commands remain
+    source = tex
+    pos_map = list(range(len(source) + 1))
+
+    for _ in range(5):  # Max nesting depth
+        new_source: list[str] = []
+        new_pos_map: list[int] = []
+        last = 0
+        found = False
+
+        for m in _INLINE_CMDS_RE.finditer(source):
+            found = True
+            # Keep text before the match
+            for j in range(last, m.start()):
+                new_source.append(source[j])
+                new_pos_map.append(pos_map[j])
+            # Keep only the content inside braces (group 1)
+            content_start = m.start(1)
+            for j in range(content_start, m.end(1)):
+                new_source.append(source[j])
+                new_pos_map.append(pos_map[j])
+            last = m.end()
+
+        if not found:
+            break
+
+        # Append remaining text after the last match
+        for j in range(last, len(source)):
+            new_source.append(source[j])
+            new_pos_map.append(pos_map[j])
+        # Sentinel for end-of-string
+        new_pos_map.append(pos_map[len(source)])
+
+        source = "".join(new_source)
+        pos_map = new_pos_map
+
+    # Also strip \%, \& etc. → plain characters
+    new_source2: list[str] = []
+    new_pos_map2: list[int] = []
+    last = 0
+    for m in _LATEX_SPECIAL_RE.finditer(source):
+        for j in range(last, m.start()):
+            new_source2.append(source[j])
+            new_pos_map2.append(pos_map[j])
+        # Keep only the special char (group 1), map to original position
+        new_source2.append(m.group(1))
+        new_pos_map2.append(pos_map[m.start(1)])
+        last = m.end()
+    for j in range(last, len(source)):
+        new_source2.append(source[j])
+        new_pos_map2.append(pos_map[j])
+    new_pos_map2.append(pos_map[len(source)])
+
+    return "".join(new_source2), new_pos_map2
+
+
+def _find_in_stripped(tex_source: str, plain_old: str) -> tuple[int, int] | None:
+    """Find *plain_old* in *tex_source* by stripping LaTeX formatting first,
+    then mapping the match positions back to the original source.
+
+    Returns ``(start, end)`` indices in *tex_source*, or ``None``.
+    """
+    stripped, pos_map = _strip_formatting(tex_source)
+
+    # Build a flexible pattern from plain_old that tolerates whitespace diffs
+    pattern = _build_flexible_pattern(plain_old)
+    m = re.search(pattern, stripped)
+    if m:
+        return pos_map[m.start()], pos_map[m.end()]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Compiler detection
 # ---------------------------------------------------------------------------
@@ -186,7 +273,18 @@ def rewrite_tex(tex_bytes: bytes, resume: ResumeData) -> bytes:
                     total_matched += 1
                     logger.debug("LaTeX rewriter: matched via flexible pattern for '%s…'", repl.old[:60])
                 else:
-                    logger.debug("LaTeX rewriter: no match for '%s…'", repl.old[:60])
+                    # Fallback 4 (formatting-aware): strip inline LaTeX
+                    # formatting (\textbf{...}, \textit{...}, etc.) from the
+                    # source, match against the plain-text form, then map
+                    # positions back to the original source.
+                    span = _find_in_stripped(tex_source, repl.old)
+                    if span:
+                        start, end = span
+                        tex_source = tex_source[:start] + new_text + tex_source[end:]
+                        total_matched += 1
+                        logger.debug("LaTeX rewriter: matched via formatting-stripped search for '%s…'", repl.old[:60])
+                    else:
+                        logger.debug("LaTeX rewriter: no match for '%s…'", repl.old[:60])
 
     logger.info(
         "LaTeX rewriter: matched %d / %d replacements.",

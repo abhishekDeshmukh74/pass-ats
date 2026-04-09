@@ -7,6 +7,7 @@ key methodologies, domain terms) using natural professional prose.
 
 from __future__ import annotations
 
+import difflib
 import logging
 
 from backend.services.agents.llm import invoke_llm_json, _sanitize_user_input
@@ -94,10 +95,13 @@ def rewrite_summary(state: AgentState) -> dict:
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": (
             f"## Summary Section (VERBATIM from resume)\n\n{sanitized_summary}\n\n"
+            f"## Full Resume (for reference — use to verify exact summary text)\n\n"
+            f"{_sanitize_user_input(state['resume_text'])}\n\n"
             f"## Keywords to Incorporate{priority_block}\n\n"
             f"## Gap Analysis Context\n\n{gap}\n\n"
             "Rewrite the summary to naturally incorporate the missing keywords. "
-            "Keep it professional and concise."
+            "Keep it professional and concise. "
+            "IMPORTANT: The 'old' field MUST be copied EXACTLY from the full resume text above."
         )},
     ])
 
@@ -118,5 +122,45 @@ def rewrite_summary(state: AgentState) -> dict:
         )
     raw = [r for r in raw if _is_real_summary(r["old"])]
 
-    logger.info("Summary rewriter: produced %d replacements.", len(raw))
-    return {"raw_replacements": raw}
+    # Programmatic fix: verify each "old" exists in the actual resume text.
+    # If the LLM produced a slightly different string (e.g. from the analyser's
+    # extraction rather than the true PDF text), attempt to find the closest
+    # matching substring in resume_text using SequenceMatcher.
+    resume_text = state.get("resume_text", "")
+    verified: list[dict] = []
+    for r in raw:
+        old = r["old"]
+        if old in resume_text:
+            verified.append(r)
+            continue
+
+        # Try to find the best matching substring of similar length
+        best_ratio = 0.0
+        best_match = ""
+        old_len = len(old)
+        # Slide a window of ±30% old_len across the resume text
+        lo = max(int(old_len * 0.7), 20)
+        hi = int(old_len * 1.3)
+        for win_size in range(lo, min(hi + 1, len(resume_text) + 1)):
+            for start in range(0, len(resume_text) - win_size + 1, 10):
+                candidate = resume_text[start:start + win_size]
+                ratio = difflib.SequenceMatcher(None, old, candidate).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = candidate
+        if best_ratio >= 0.75:
+            logger.info(
+                "Summary rewriter: fixed 'old' text (%.0f%% match): %r → %r",
+                best_ratio * 100, old[:60], best_match[:60],
+            )
+            r["old"] = best_match
+            if r["old"] != r["new"]:
+                verified.append(r)
+        else:
+            logger.warning(
+                "Summary rewriter: dropping replacement — 'old' not found in resume "
+                "(best match %.0f%%): %s…", best_ratio * 100, old[:80],
+            )
+
+    logger.info("Summary rewriter: produced %d replacements.", len(verified))
+    return {"raw_replacements": verified}

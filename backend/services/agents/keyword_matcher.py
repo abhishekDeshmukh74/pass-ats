@@ -330,6 +330,7 @@ def calculate_keyword_match(
             matched_weight += w * (d.confidence / 100.0)
 
     pct = (matched_weight / total_weight) * 100 if total_weight else 0.0
+    pct = min(pct, 100.0)  # Position bonus can push above 100; clamp
 
     # ── Stuffing penalty ─────────────────────────────────────────────
     stuffing = _detect_stuffing(text, keywords)

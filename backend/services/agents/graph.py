@@ -392,7 +392,12 @@ def stream_preview_resume(resume_text: str, jd_text: str):
 
                 yield ("agent_complete", progress)
 
-        replacements = accumulated.get("replacements", [])
+        raw_replacements = accumulated.get("replacements", [])
+        # Convert TextReplacement Pydantic objects to plain dicts for JSON serialisation
+        replacements = [
+            r.model_dump() if hasattr(r, "model_dump") else r
+            for r in raw_replacements
+        ]
         result = {
             "replacements": replacements,
             "ats_score_before": accumulated.get("ats_score_before", 0),
